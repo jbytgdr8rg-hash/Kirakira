@@ -1,0 +1,640 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+<title>きらきら ばんざい</title>
+<style>
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%; overflow: hidden;
+    background: #120a2a; color: #fff;
+    font-family: "Hiragino Maru Gothic ProN", "ヒラギノ丸ゴ ProN", "Rounded Mgothic", system-ui, sans-serif;
+    user-select: none;
+  }
+  #stage { position: fixed; inset: 0; overflow: hidden; }
+  #cam {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; background: #000;
+  }
+  #cam.mirror { transform: scaleX(-1); }
+  #fx { position: absolute; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+
+  /* ---- HUD ---- */
+  #hud {
+    position: absolute; left: 0; right: 0; top: 0;
+    padding: calc(env(safe-area-inset-top) + 10px) 14px 0;
+    pointer-events: none;
+  }
+  #starRow { display: flex; align-items: center; gap: 10px; }
+  #starCount {
+    font-size: 30px; font-weight: 800; line-height: 1;
+    text-shadow: 0 2px 0 #ff4fa3, 0 0 18px rgba(255,120,190,.9);
+  }
+  #meter {
+    flex: 1; height: 16px; border-radius: 999px;
+    background: rgba(255,255,255,.22);
+    border: 2px solid rgba(255,255,255,.55);
+    overflow: hidden;
+  }
+  #meterFill {
+    height: 100%; width: 0%;
+    background: linear-gradient(90deg,#ffe14d,#ff8ad1,#7de3ff);
+    transition: width .25s ease-out;
+  }
+  #status {
+    margin-top: 8px; display: inline-block;
+    font-size: 13px; padding: 5px 12px; border-radius: 999px;
+    background: rgba(0,0,0,.42); color: #ffe9a8;
+  }
+  #prompt {
+    position: absolute; left: 0; right: 0; bottom: calc(env(safe-area-inset-bottom) + 96px);
+    text-align: center; font-size: 30px; font-weight: 800;
+    text-shadow: 0 3px 0 #5b2a8f, 0 0 24px rgba(255,255,255,.6);
+    pointer-events: none; transition: opacity .3s;
+  }
+  #bigText {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    font-size: 15vw; font-weight: 900; letter-spacing: .04em;
+    color: #fff; text-shadow: 0 0 30px #ff5fb0, 0 6px 0 #ff2e86;
+    opacity: 0; pointer-events: none;
+  }
+  #bigText.show { animation: pop 1.4s ease-out; }
+  @keyframes pop {
+    0% { opacity: 0; transform: scale(.4) rotate(-8deg); }
+    18% { opacity: 1; transform: scale(1.15) rotate(3deg); }
+    35% { transform: scale(1) rotate(0); }
+    80% { opacity: 1; }
+    100% { opacity: 0; transform: scale(1.05); }
+  }
+
+  /* ---- ボタン ---- */
+  #tools {
+    position: absolute; right: 12px; bottom: calc(env(safe-area-inset-bottom) + 16px);
+    display: flex; flex-direction: column; gap: 12px;
+  }
+  .tool {
+    width: 56px; height: 56px; border-radius: 50%; border: none;
+    background: rgba(255,255,255,.2); backdrop-filter: blur(6px);
+    color: #fff; font-size: 24px; line-height: 56px; text-align: center;
+    border: 2px solid rgba(255,255,255,.45);
+  }
+
+  /* ---- スタート画面 ---- */
+  #start {
+    position: absolute; inset: 0; z-index: 10;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 22px; padding: 28px; text-align: center;
+    background: radial-gradient(circle at 50% 35%, #4b2a9c, #150c33 70%);
+  }
+  #start h1 { font-size: 40px; margin: 0; text-shadow: 0 4px 0 #ff3f95; }
+  #start p { margin: 0; font-size: 16px; line-height: 1.9; color: #dccffd; }
+  #go {
+    padding: 20px 46px; font-size: 26px; font-weight: 800; border: none;
+    border-radius: 999px; color: #4a1160;
+    background: linear-gradient(180deg,#ffe98a,#ffb43f);
+    box-shadow: 0 8px 0 #c9761a;
+  }
+  #go:active { transform: translateY(5px); box-shadow: 0 3px 0 #c9761a; }
+  #err { font-size: 14px; color: #ffb3c8; max-width: 340px; line-height: 1.7; }
+</style>
+</head>
+<body>
+<div id="stage">
+  <video id="cam" playsinline muted autoplay></video>
+  <canvas id="fx"></canvas>
+
+  <div id="hud">
+    <div id="starRow">
+      <div id="starCount">⭐ 0</div>
+      <div id="meter"><div id="meterFill"></div></div>
+    </div>
+    <div id="status">じゅんびちゅう…</div>
+  </div>
+
+  <div id="prompt"></div>
+  <div id="bigText"></div>
+
+  <div id="tools">
+    <button class="tool" id="btnFlip" aria-label="カメラ切替">🔄</button>
+    <button class="tool" id="btnMute" aria-label="おと">🔊</button>
+  </div>
+
+  <div id="start">
+    <h1>きらきら<br>ばんざい</h1>
+    <p>ばんざい・かたて・にっこり で<br>エフェクトと おとが でるよ<br>ふうせんを てで わってあそぼう</p>
+    <button id="go">はじめる</button>
+    <div id="err"></div>
+  </div>
+</div>
+
+<script>
+// MediaPipe は「はじめる」を押した後に動的 import する。
+// こうしないと file:// で開いたときスクリプト全体が実行されず、
+// ボタンが無反応になり原因が分からなくなる。
+let FilesetResolver, FaceLandmarker, PoseLandmarker;
+
+/* ============================================================
+   a. STATE — 全状態を単一オブジェクトに集約
+   ------------------------------------------------------------
+   running   : boolean          ループ稼働中か
+   mirror    : boolean          左右反転表示（フロントカメラ時true）
+   facing    : 'user'|'environment'
+   muted     : boolean
+   stars     : number           累計ほし
+   level     : number           お祝い済み回数（10ほしごと）
+   raised    : {L:bool, R:bool} 直前フレームの挙手状態（被写体視点の左右）
+   smiling   : boolean          直前フレームの笑顔状態
+   cool      : {both,one,smile,lure: number}  次に発火できる時刻(ms)
+   lastEvent : number           最後にイベントが起きた時刻(ms)
+   balloon   : {side:'L'|'R', y:number, t:number, alive:bool, respawn:number}
+   parts     : Particle[]       {x,y,vx,vy,g,life,max,size,ch,rot,vr,alpha}
+   flash     : {t:number, hue:number}
+   face      : {x,y,r} | null   顔の画面座標（笑顔エフェクトの発生源）
+   hands     : {L:{x,y}|null, R:{x,y}|null}
+   ============================================================ */
+const STATE = {
+  running: false, mirror: true, facing: 'user', muted: false,
+  stars: 0, level: 0,
+  raised: { L: false, R: false }, smiling: false,
+  cool: { both: 0, one: 0, smile: 0, lure: 0 },
+  lastEvent: 0,
+  balloon: { side: 'L', y: 0.34, t: 0, alive: true, respawn: 0 },
+  parts: [], flash: { t: 0, hue: 0 },
+  face: null, hands: { L: null, R: null },
+  chick: null   // {x, t} おさそいキャラ
+};
+
+/* ---------- b. データ定義 ---------- */
+const SCALE = [523.25, 587.33, 659.25, 783.99, 880.00, 1046.50, 1174.66, 1318.51]; // C5..D6 ペンタ寄り
+const EMOJI = {
+  both:  ['🌈','⭐','🌟','✨','🎉','💫','🎊'],
+  one:   ['✨','⭐','💫','🫧','🍀'],
+  smile: ['💖','💛','🫧','🌸','😊','💕'],
+  pop:   ['🎈','✨','🎉','💥'],
+  party: ['🎆','🎇','⭐','🌟','🎉','💖','🌈']
+};
+const PROMPTS = [
+  'ばんざーい してみよう！',
+  'かたて あげられるかな？',
+  'にっこり してみて！',
+  'ふうせん さわれるかな？',
+  'おてて たかく たかーく！'
+];
+const VIDEO = document.getElementById('cam');
+const CV = document.getElementById('fx');
+const CX = CV.getContext('2d');
+const $status = document.getElementById('status');
+const $stars  = document.getElementById('starCount');
+const $fill   = document.getElementById('meterFill');
+const $prompt = document.getElementById('prompt');
+const $big    = document.getElementById('bigText');
+const $err    = document.getElementById('err');
+
+let pose = null, face = null, stream = null, actx = null, master = null;
+let turn = 0; // 0:pose 1:face の交互実行
+
+/* ---------- c. 純粋関数・小道具 ---------- */
+const now = () => performance.now();
+const rnd = (a, b) => a + Math.random() * (b - a);
+const pick = arr => arr[(Math.random() * arr.length) | 0];
+
+// 映像の object-fit:cover を考慮して 正規化座標 → 画面座標 に変換
+function toScreen(nx, ny) {
+  const cw = CV.width, ch = CV.height;
+  const vw = VIDEO.videoWidth || 1280, vh = VIDEO.videoHeight || 720;
+  const s = Math.max(cw / vw, ch / vh);
+  const ox = (cw - vw * s) / 2, oy = (ch - vh * s) / 2;
+  const x = STATE.mirror ? (1 - nx) : nx;
+  return { x: ox + x * vw * s, y: oy + ny * vh * s };
+}
+
+function addStars(n) {
+  STATE.stars += n;
+  $stars.textContent = '⭐ ' + STATE.stars;
+  $fill.style.width = ((STATE.stars % 10) * 10) + '%';
+  const lv = Math.floor(STATE.stars / 10);
+  if (lv > STATE.level) { STATE.level = lv; celebrate(); }
+}
+
+function showBig(text) {
+  $big.textContent = text;
+  $big.classList.remove('show');
+  void $big.offsetWidth;
+  $big.classList.add('show');
+}
+
+/* ---------- おと（WebAudio） ---------- */
+function tone(freq, t0, dur, type = 'sine', vol = 0.5) {
+  if (!actx || STATE.muted) return;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.setValueAtTime(freq, t0);
+  g.gain.setValueAtTime(0.0001, t0);
+  g.gain.exponentialRampToValueAtTime(vol, t0 + 0.02);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  o.connect(g); g.connect(master); o.start(t0); o.stop(t0 + dur + 0.05);
+}
+function chime(freq, vol = 0.5) {
+  if (!actx) return;
+  const t = actx.currentTime;
+  tone(freq, t, 0.9, 'sine', vol);
+  tone(freq * 2, t, 0.5, 'triangle', vol * 0.35);
+  tone(freq * 3, t, 0.3, 'sine', vol * 0.15);
+}
+function run(up = true, n = 6, vol = 0.45) {
+  if (!actx) return;
+  const t = actx.currentTime;
+  for (let i = 0; i < n; i++) {
+    const f = SCALE[up ? i % SCALE.length : (SCALE.length - 1 - i % SCALE.length)];
+    tone(f, t + i * 0.07, 0.5, 'sine', vol);
+    tone(f * 2, t + i * 0.07, 0.28, 'triangle', vol * 0.3);
+  }
+}
+function chord(freqs, vol = 0.4) {
+  if (!actx) return;
+  const t = actx.currentTime;
+  freqs.forEach((f, i) => tone(f, t + i * 0.02, 1.1, 'sine', vol));
+}
+function fanfare() {
+  if (!actx) return;
+  const t = actx.currentTime;
+  const seq = [523.25, 659.25, 783.99, 1046.50, 783.99, 1046.50, 1318.51];
+  seq.forEach((f, i) => {
+    tone(f, t + i * 0.12, 0.45, 'triangle', 0.5);
+    tone(f * 1.5, t + i * 0.12, 0.3, 'sine', 0.18);
+  });
+}
+function boing() {
+  if (!actx || STATE.muted) return;
+  const t = actx.currentTime;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = 'sine';
+  o.frequency.setValueAtTime(260, t);
+  o.frequency.exponentialRampToValueAtTime(660, t + 0.12);
+  o.frequency.exponentialRampToValueAtTime(300, t + 0.3);
+  g.gain.setValueAtTime(0.0001, t);
+  g.gain.exponentialRampToValueAtTime(0.45, t + 0.03);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.42);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.5);
+}
+function popSound() {
+  if (!actx || STATE.muted) return;
+  const t = actx.currentTime;
+  const o = actx.createOscillator(), g = actx.createGain();
+  o.type = 'square';
+  o.frequency.setValueAtTime(900, t);
+  o.frequency.exponentialRampToValueAtTime(180, t + 0.09);
+  g.gain.setValueAtTime(0.35, t);
+  g.gain.exponentialRampToValueAtTime(0.0001, t + 0.13);
+  o.connect(g); g.connect(master); o.start(t); o.stop(t + 0.15);
+}
+
+/* ---------- エフェクト生成 ---------- */
+function burst(x, y, n, kind, opt = {}) {
+  const chars = EMOJI[kind];
+  for (let i = 0; i < n; i++) {
+    const a = opt.dir !== undefined ? opt.dir + rnd(-0.9, 0.9) : rnd(0, Math.PI * 2);
+    const sp = rnd(opt.spMin || 3, opt.spMax || 11);
+    STATE.parts.push({
+      x, y, vx: Math.cos(a) * sp, vy: Math.sin(a) * sp,
+      g: opt.g === undefined ? 0.18 : opt.g,
+      life: 0, max: rnd(60, 130),
+      size: rnd(opt.sMin || 26, opt.sMax || 60),
+      ch: pick(chars), rot: rnd(0, 6.28), vr: rnd(-0.12, 0.12)
+    });
+  }
+}
+function rain(n, kind) {
+  for (let i = 0; i < n; i++) {
+    STATE.parts.push({
+      x: rnd(0, CV.width), y: rnd(-CV.height * 0.4, -20),
+      vx: rnd(-1, 1), vy: rnd(2, 6), g: 0.05,
+      life: 0, max: rnd(120, 200), size: rnd(24, 54),
+      ch: pick(EMOJI[kind]), rot: rnd(0, 6.28), vr: rnd(-0.08, 0.08)
+    });
+  }
+}
+
+/* ---------- イベント（ごほうび） ---------- */
+function onBoth() {
+  const L = STATE.hands.L, R = STATE.hands.R;
+  const cx = CV.width / 2, cy = CV.height * 0.35;
+  burst(L ? L.x : cx - 120, L ? L.y : cy, 22, 'both', { dir: -1.9, spMin: 5, spMax: 14 });
+  burst(R ? R.x : cx + 120, R ? R.y : cy, 22, 'both', { dir: -1.2, spMin: 5, spMax: 14 });
+  rain(26, 'both');
+  STATE.flash = { t: 1, hue: rnd(0, 360) };
+  run(true, 7, 0.5);
+  chord([523.25, 659.25, 783.99, 1046.50], 0.35);
+  showBig('ばんざーい！');
+  addStars(3);
+  STATE.lastEvent = now();
+}
+function onOne(side) {
+  const h = STATE.hands[side];
+  const x = h ? h.x : (side === 'L' ? CV.width * 0.25 : CV.width * 0.75);
+  const y = h ? h.y : CV.height * 0.35;
+  burst(x, y, 16, 'one', { dir: -1.57, spMin: 3, spMax: 9 });
+  chime(pick(SCALE), 0.5);
+  addStars(1);
+  STATE.lastEvent = now();
+}
+function onSmile() {
+  const f = STATE.face;
+  const x = f ? f.x : CV.width / 2, y = f ? f.y : CV.height * 0.4;
+  const r = f ? f.r : 120;
+  for (let i = 0; i < 18; i++) {
+    const a = (i / 18) * Math.PI * 2;
+    STATE.parts.push({
+      x: x + Math.cos(a) * r, y: y + Math.sin(a) * r,
+      vx: Math.cos(a) * rnd(1.5, 4), vy: Math.sin(a) * rnd(1.5, 4) - 1.5,
+      g: -0.04, life: 0, max: rnd(80, 140), size: rnd(28, 58),
+      ch: pick(EMOJI.smile), rot: rnd(0, 6.28), vr: rnd(-0.06, 0.06)
+    });
+  }
+  chord([440, 554.37, 659.25, 880], 0.34);
+  chime(1046.5, 0.3);
+  showBig('にこにこ！');
+  addStars(2);
+  STATE.lastEvent = now();
+}
+function onPop(side) {
+  const x = side === 'L' ? CV.width * 0.22 : CV.width * 0.78;
+  const y = STATE.balloon.y * CV.height;
+  burst(x, y, 26, 'pop', { spMin: 4, spMax: 13, g: 0.22 });
+  popSound();
+  setTimeout(() => fanfare(), 90);
+  showBig('パン！');
+  addStars(2);
+  STATE.balloon.alive = false;
+  STATE.balloon.respawn = now() + 1400;
+  STATE.lastEvent = now();
+}
+function celebrate() {
+  for (let i = 0; i < 5; i++) {
+    setTimeout(() => {
+      burst(rnd(CV.width * 0.15, CV.width * 0.85), rnd(CV.height * 0.15, CV.height * 0.55),
+            24, 'party', { spMin: 4, spMax: 14, g: 0.12 });
+      STATE.flash = { t: 0.8, hue: rnd(0, 360) };
+    }, i * 220);
+  }
+  rain(40, 'party');
+  fanfare();
+  showBig('やったね！');
+}
+function lure() {
+  STATE.chick = { x: -80, t: 0 };
+  boing();
+  $prompt.textContent = pick(PROMPTS);
+  $prompt.style.opacity = '1';
+  setTimeout(() => { $prompt.style.opacity = '0'; }, 3200);
+}
+
+/* ---------- 検出 → イベント判定 ---------- */
+function readPose(res) {
+  const lm = res.landmarks && res.landmarks[0];
+  if (!lm) { STATE.hands.L = STATE.hands.R = null; return false; }
+  const nose = lm[0], sL = lm[11], sR = lm[12], wL = lm[15], wR = lm[16];
+  const vis = p => p && (p.visibility === undefined || p.visibility > 0.4);
+  const upL = vis(wL) && vis(sL) && wL.y < sL.y - 0.03;
+  const upR = vis(wR) && vis(sR) && wR.y < sR.y - 0.03;
+  STATE.hands.L = vis(wL) ? toScreen(wL.x, wL.y) : null;
+  STATE.hands.R = vis(wR) ? toScreen(wR.x, wR.y) : null;
+
+  const t = now();
+  if (upL && upR) {
+    if (!(STATE.raised.L && STATE.raised.R) && t > STATE.cool.both) {
+      STATE.cool.both = t + 1500; STATE.cool.one = t + 1500;
+      onBoth();
+    }
+  } else if (upL || upR) {
+    const side = upL ? 'L' : 'R';
+    if (!STATE.raised[side] && t > STATE.cool.one) {
+      STATE.cool.one = t + 900;
+      if (STATE.balloon.alive && STATE.balloon.side === side) onPop(side);
+      else onOne(side);
+    }
+  }
+  STATE.raised.L = upL; STATE.raised.R = upR;
+  return !!nose;
+}
+
+function readFace(res) {
+  const lm = res.faceLandmarks && res.faceLandmarks[0];
+  if (!lm) { STATE.face = null; STATE.smiling = false; return false; }
+  const c = toScreen(lm[1].x, lm[1].y);
+  const a = toScreen(lm[234].x, lm[234].y), b = toScreen(lm[454].x, lm[454].y);
+  STATE.face = { x: c.x, y: c.y, r: Math.max(70, Math.hypot(a.x - b.x, a.y - b.y) * 0.75) };
+
+  const bs = res.faceBlendshapes && res.faceBlendshapes[0];
+  let smile = 0;
+  if (bs) {
+    for (const cat of bs.categories) {
+      if (cat.categoryName === 'mouthSmileLeft' || cat.categoryName === 'mouthSmileRight')
+        smile += cat.score / 2;
+    }
+  }
+  const isSmile = smile > 0.34;
+  const t = now();
+  if (isSmile && !STATE.smiling && t > STATE.cool.smile) {
+    STATE.cool.smile = t + 2200;
+    onSmile();
+  }
+  STATE.smiling = isSmile;
+  return true;
+}
+
+/* ---------- d. 描画（毎フレーム全面再描画） ---------- */
+function draw() {
+  const w = CV.width, h = CV.height;
+  CX.clearRect(0, 0, w, h);
+
+  // 画面フラッシュ
+  if (STATE.flash.t > 0) {
+    CX.fillStyle = `hsla(${STATE.flash.hue}, 100%, 70%, ${STATE.flash.t * 0.35})`;
+    CX.fillRect(0, 0, w, h);
+    STATE.flash.t -= 0.045;
+  }
+
+  // ふうせん（ターゲット）
+  const b = STATE.balloon;
+  if (b.alive) {
+    b.t += 0.04;
+    const x = (b.side === 'L' ? 0.22 : 0.78) * w;
+    const y = (b.y + Math.sin(b.t) * 0.035) * h;
+    CX.save();
+    CX.translate(x, y);
+    CX.rotate(Math.sin(b.t * 0.7) * 0.12);
+    const pulse = 1 + Math.sin(b.t * 2) * 0.06;
+    CX.scale(pulse, pulse);
+    CX.shadowColor = 'rgba(255,255,255,.9)'; CX.shadowBlur = 24;
+    CX.font = `${Math.round(Math.min(w, h) * 0.19)}px serif`;
+    CX.textAlign = 'center'; CX.textBaseline = 'middle';
+    CX.fillText('🎈', 0, 0);
+    CX.restore();
+  } else if (now() > b.respawn) {
+    b.alive = true;
+    b.side = b.side === 'L' ? 'R' : 'L';
+    b.y = rnd(0.26, 0.42);
+  }
+
+  // おさそいキャラ
+  if (STATE.chick) {
+    STATE.chick.t += 1;
+    STATE.chick.x += w / 150;
+    const hop = Math.abs(Math.sin(STATE.chick.t * 0.13)) * h * 0.09;
+    CX.save();
+    CX.font = `${Math.round(Math.min(w, h) * 0.16)}px serif`;
+    CX.textAlign = 'center'; CX.textBaseline = 'middle';
+    CX.fillText('🐥', STATE.chick.x, h * 0.82 - hop);
+    CX.restore();
+    if (STATE.chick.x > w + 100) STATE.chick = null;
+  }
+
+  // パーティクル
+  CX.textAlign = 'center'; CX.textBaseline = 'middle';
+  for (let i = STATE.parts.length - 1; i >= 0; i--) {
+    const p = STATE.parts[i];
+    p.life++;
+    p.x += p.vx; p.y += p.vy; p.vy += p.g;
+    p.vx *= 0.985; p.rot += p.vr;
+    if (p.life > p.max || p.y > h + 120) { STATE.parts.splice(i, 1); continue; }
+    const a = Math.min(1, (p.max - p.life) / 30);
+    CX.save();
+    CX.globalAlpha = a;
+    CX.translate(p.x, p.y);
+    CX.rotate(p.rot);
+    CX.font = `${p.size}px serif`;
+    CX.fillText(p.ch, 0, 0);
+    CX.restore();
+  }
+
+  // 手のオーラ
+  for (const k of ['L', 'R']) {
+    const hp = STATE.hands[k];
+    if (!hp || !STATE.raised[k]) continue;
+    const r = Math.min(w, h) * 0.09 * (1 + Math.sin(now() / 120) * 0.12);
+    const g = CX.createRadialGradient(hp.x, hp.y, 0, hp.x, hp.y, r);
+    g.addColorStop(0, 'rgba(255,255,255,.75)');
+    g.addColorStop(0.5, 'rgba(255,220,120,.35)');
+    g.addColorStop(1, 'rgba(255,180,255,0)');
+    CX.fillStyle = g;
+    CX.beginPath(); CX.arc(hp.x, hp.y, r, 0, 6.284); CX.fill();
+  }
+}
+
+/* ---------- ループ ---------- */
+let lastTs = -1;
+function loop() {
+  if (!STATE.running) return;
+  const ts = now();
+  if (VIDEO.readyState >= 2 && ts !== lastTs) {
+    lastTs = ts;
+    let seen = false;
+    if (turn === 0 && pose) seen = readPose(pose.detectForVideo(VIDEO, ts));
+    else if (face) seen = readFace(face.detectForVideo(VIDEO, ts));
+    turn ^= 1;
+    if (seen) $status.textContent = 'みつけたよ！ うごいてみてね';
+  }
+
+  // おさそい：6秒 反応がなければ呼びかける
+  if (ts - STATE.lastEvent > 6000 && ts > STATE.cool.lure) {
+    STATE.cool.lure = ts + 7000;
+    lure();
+  }
+
+  draw();
+  requestAnimationFrame(loop);
+}
+
+/* ---------- e. イベントハンドラ・初期化 ---------- */
+function resize() {
+  const d = Math.min(window.devicePixelRatio || 1, 2);
+  CV.width = Math.round(window.innerWidth * d);
+  CV.height = Math.round(window.innerHeight * d);
+  CV.style.width = window.innerWidth + 'px';
+  CV.style.height = window.innerHeight + 'px';
+}
+window.addEventListener('resize', resize);
+
+async function startCamera() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = await navigator.mediaDevices.getUserMedia({
+    video: { facingMode: STATE.facing, width: { ideal: 960 }, height: { ideal: 720 } },
+    audio: false
+  });
+  VIDEO.srcObject = stream;
+  await VIDEO.play();
+  STATE.mirror = (STATE.facing === 'user');
+  VIDEO.classList.toggle('mirror', STATE.mirror);
+}
+
+async function boot() {
+  $err.textContent = '';
+  try {
+    // --- 環境チェック（ここで落ちる場合は必ず理由を表示する） ---
+    if (location.protocol === 'file:') {
+      throw new Error('file:// で開いています。カメラは https か localhost でしか使えません。');
+    }
+    if (!window.isSecureContext) {
+      throw new Error('安全な接続（https）ではないため、カメラを使えません。');
+    }
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      throw new Error('このページにカメラの権限がありません（埋め込み枠の中かもしれません）。');
+    }
+
+    actx = new (window.AudioContext || window.webkitAudioContext)();
+    await actx.resume();
+    master = actx.createGain(); master.gain.value = 0.3; master.connect(actx.destination);
+
+    $status.textContent = 'カメラを よびだしています…';
+    await startCamera();
+
+    $status.textContent = 'じゅんびちゅう… (すこし まってね)';
+    const mp = await import("https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14");
+    ({ FilesetResolver, FaceLandmarker, PoseLandmarker } = mp);
+    const vision = await FilesetResolver.forVisionTasks(
+      "https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm");
+    pose = await PoseLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/pose_landmarker/pose_landmarker_lite/float16/1/pose_landmarker_lite.task",
+        delegate: "GPU"
+      },
+      runningMode: "VIDEO", numPoses: 1
+    });
+    face = await FaceLandmarker.createFromOptions(vision, {
+      baseOptions: {
+        modelAssetPath: "https://storage.googleapis.com/mediapipe-models/face_landmarker/face_landmarker/float16/1/face_landmarker.task",
+        delegate: "GPU"
+      },
+      runningMode: "VIDEO", numFaces: 1, outputFaceBlendshapes: true
+    });
+
+    document.getElementById('start').style.display = 'none';
+    resize();
+    STATE.running = true;
+    STATE.lastEvent = now();
+    $status.textContent = 'あそべるよ！';
+    chime(783.99, 0.4);
+    setTimeout(() => run(true, 5, 0.35), 120);
+    lure();
+    loop();
+  } catch (e) {
+    $err.style.whiteSpace = 'pre-wrap';
+    $err.textContent = 'はじめられませんでした\n' + (e && e.message ? e.message : e);
+    $status.textContent = 'エラー';
+  }
+}
+
+document.getElementById('go').addEventListener('click', boot);
+document.getElementById('btnFlip').addEventListener('click', async () => {
+  STATE.facing = STATE.facing === 'user' ? 'environment' : 'user';
+  try { await startCamera(); } catch (e) { $status.textContent = 'カメラを きりかえられません'; }
+});
+document.getElementById('btnMute').addEventListener('click', (e) => {
+  STATE.muted = !STATE.muted;
+  e.currentTarget.textContent = STATE.muted ? '🔇' : '🔊';
+});
+resize();
+</script>
+</body>
+</html>
